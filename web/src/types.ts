@@ -23,8 +23,8 @@ export interface Gun {
   id: string;
   col: number;
   row: number;
-  cooldown: number; // ms remaining
-  cooldownMax: number; // ms between shots
+  cooldown: number;
+  cooldownMax: number;
 }
 
 export interface Bullet {
@@ -60,6 +60,15 @@ export interface FloatingText {
   maxLife: number;
 }
 
+// A visual slash effect shown when the player clicks a monster
+export interface SlashEffect {
+  id: string;
+  x: number;
+  y: number;
+  life: number;
+  maxLife: number;
+}
+
 export interface GameState {
   phase: Phase;
   coins: number;
@@ -71,10 +80,12 @@ export interface GameState {
   bullets: Bullet[];
   monsters: Monster[];
   floatingTexts: FloatingText[];
+  slashEffects: SlashEffect[];
   swordTier: SwordTier;
   placingMode: PlacingMode;
   gameOver: boolean;
   monstersKilled: number;
+  swordCooldown: number; // ms remaining before sword can swing again
 }
 
 export const PET_TIER_ORDER: PetTier[] = ["normal", "uncommon", "rare", "legendary", "mythical", "god"];
@@ -98,13 +109,34 @@ export const SWORD_UPGRADE_COST: Record<SwordTier, number | null> = {
   diamond: null,
 };
 
+// Click-damage per sword tier (one swing)
+export const SWORD_CLICK_DAMAGE: Record<SwordTier, number> = {
+  wood: 15,
+  metal: 28,
+  silver: 45,
+  gold: 70,
+  jade: 100,
+  diamond: 999,
+};
+
+// Passive aura damage per second (kept low so clicking is the main mechanic)
 export const SWORD_DAMAGE: Record<SwordTier, number> = {
-  wood: 10,
-  metal: 20,
-  silver: 35,
-  gold: 55,
-  jade: 80,
-  diamond: 120,
+  wood: 4,
+  metal: 8,
+  silver: 14,
+  gold: 22,
+  jade: 32,
+  diamond: 50,
+};
+
+// How long between sword clicks (ms)
+export const SWORD_COOLDOWN_MS: Record<SwordTier, number> = {
+  wood: 700,
+  metal: 600,
+  silver: 500,
+  gold: 400,
+  jade: 300,
+  diamond: 200,
 };
 
 export const PET_TIER_COLORS: Record<PetTier, string> = {
@@ -130,6 +162,15 @@ export const SWORD_EMOJIS: Record<SwordTier, string> = {
   gold: "✨",
   jade: "💎",
   diamond: "💠",
+};
+
+export const SWORD_COLORS: Record<SwordTier, string> = {
+  wood: "#a16207",
+  metal: "#6b7280",
+  silver: "#e2e8f0",
+  gold: "#f59e0b",
+  jade: "#10b981",
+  diamond: "#38bdf8",
 };
 
 export const GRID_COLS = 15;

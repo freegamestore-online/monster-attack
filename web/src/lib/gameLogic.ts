@@ -1,6 +1,6 @@
 import {
-  GameState, Monster, Block, Gun, Bullet, FloatingText,
-  PET_TIER_ORDER, SWORD_TIER_ORDER, SWORD_DAMAGE,
+  GameState, Monster, Block, Gun, Bullet, FloatingText, SlashEffect,
+  PET_TIER_ORDER, SWORD_TIER_ORDER, SWORD_DAMAGE, SWORD_CLICK_DAMAGE, SWORD_COOLDOWN_MS,
   GRID_COLS, GRID_ROWS, PET_COL, PET_ROW, BLOCK_HP,
   PET_UPGRADE_COST, SWORD_UPGRADE_COST, BLOCK_COST, GUN_COST,
 } from "../types";
@@ -12,22 +12,20 @@ export function cellToPixel(col: number, row: number, cellSize: number) {
   return { x: col * cellSize + cellSize / 2, y: row * cellSize + cellSize / 2 };
 }
 
-export function pixelToCell(x: number, y: number, cellSize: number) {
-  return { col: Math.floor(x / cellSize), row: Math.floor(y / cellSize) };
-}
-
 export function dist(ax: number, ay: number, bx: number, by: number) {
   return Math.sqrt((ax - bx) ** 2 + (ay - by) ** 2);
 }
 
-function spawnMonster(wave: number): Monster {
+function spawnMonster(wave: number, cellSize: number): Monster {
   const side = Math.floor(Math.random() * 4);
   let x = 0, y = 0;
   const margin = -30;
-  if (side === 0) { x = Math.random() * GRID_COLS * 48; y = margin; }
-  else if (side === 1) { x = GRID_COLS * 48 - margin; y = Math.random() * GRID_ROWS * 48; }
-  else if (side === 2) { x = Math.random() * GRID_COLS * 48; y = GRID_ROWS * 48 - margin; }
-  else { x = margin; y = Math.random() * GRID_ROWS * 48; }
+  const W = GRID_COLS * cellSize;
+  const H = GRID_ROWS * cellSize;
+  if (side === 0) { x = Math.random() * W; y = margin; }
+  else if (side === 1) { x = W - margin; y = Math.random() * H; }
+  else if (side === 2) { x = Math.random() * W; y = H - margin; }
+  else { x = margin; y = Math.random() * H; }
 
   const emojis = ["👾", "🧟", "👹", "🦇", "🕷️", "🐍", "💀", "🦑"];
   const hp = 20 + wave * 10;
@@ -49,20 +47,68 @@ export function startWave(state: GameState, cellSize: number): GameState {
   const count = 3 + wave * 2;
   const monsters: Monster[] = [];
   for (let i = 0; i < count; i++) {
-    monsters.push(spawnMonster(wave));
+    monsters.push(spawnMonster(wave, cellSize));
   }
-  // Use cellSize for spawn positions
-  const scaledMonsters = monsters.map(m => ({
-    ...m,
-    x: m.x * (cellSize / 48),
-    y: m.y * (cellSize / 48),
-  }));
-  return { ...state, wave, waveActive: true, monsters: [...state.monsters, ...scaledMonsters] };
+  return { ...state, wave, waveActive: true, monsters: [...state.monsters, ...monsters] };
 }
 
 function addFloat(state: GameState, x: number, y: number, text: string, color: string): GameState {
   const ft: FloatingText = { id: nextId(), x, y, text, color, life: 1.2, maxLife: 1.2 };
   return { ...state, floatingTexts: [...state.floatingTexts, ft] };
+}
+
+// ── Sword click: player clicks on a monster to deal click damage ──────────────
+export function swordSlash(state: GameState, clickX: number, clickY: number, cellSize: number): GameState {
+  if (!state.waveActive || state.gameOver) return state;
+  if (state.swordCooldown > 0) return state; // still on cooldown
+
+  const hitRadius = cellSize * 0.7;
+  let s = { ...state };
+
+  // Find the monster closest to the click point
+  let target: Monster | null = null;
+  let targetDist = Infinity;
+  for (const m of s.monsters) {
+    const d = dist(clickX, clickY, m.x, m.y);
+    if (d < hitRadius && d < targetDist) {
+      targetDist = d;
+      target = m;
+    }
+  }
+
+  if (!target) return state; // missed — no cooldown used
+
+  const dmg = SWORD_CLICK_DAMAGE[s.swordTier];
+  const newHp = target.hp - dmg;
+
+  // Add slash visual
+  const slash: SlashEffect = {
+    id: nextId(),
+    x: target.x,
+    y: target.y,
+    life: 0.35,
+    maxLife: 0.35,
+  };
+  s = { ...s, slashEffects: [...s.slashEffects, slash] };
+
+  // Apply sword cooldown
+  s = { ...s, swordCooldown: SWORD_COOLDOWN_MS[s.swordTier] };
+
+  if (newHp <= 0) {
+    s = { ...s, monsters: s.monsters.filter(m => m.id !== target!.id) };
+    s = { ...s, coins: s.coins + 1, monstersKilled: s.monstersKilled + 1 };
+    s = addFloat(s, target.x, target.y - cellSize * 0.7, `⚔️ +1🪙`, "#fbbf24");
+  } else {
+    s = {
+      ...s,
+      monsters: s.monsters.map(m =>
+        m.id === target!.id ? { ...m, hp: newHp } : m
+      ),
+    };
+    s = addFloat(s, target.x, target.y - cellSize * 0.5, `-${dmg}`, "#ef4444");
+  }
+
+  return s;
 }
 
 export function tickGame(state: GameState, dt: number, cellSize: number): GameState {
@@ -71,8 +117,10 @@ export function tickGame(state: GameState, dt: number, cellSize: number): GameSt
   let s = { ...state };
   const petX = PET_COL * cellSize + cellSize / 2;
   const petY = PET_ROW * cellSize + cellSize / 2;
-  const swordRange = cellSize * 2.5;
   const swordDmg = SWORD_DAMAGE[s.swordTier];
+
+  // Tick sword cooldown
+  s = { ...s, swordCooldown: Math.max(0, s.swordCooldown - dt * 1000) };
 
   // Update floating texts
   s = {
@@ -80,6 +128,14 @@ export function tickGame(state: GameState, dt: number, cellSize: number): GameSt
     floatingTexts: s.floatingTexts
       .map(ft => ({ ...ft, life: ft.life - dt, y: ft.y - 30 * dt }))
       .filter(ft => ft.life > 0),
+  };
+
+  // Update slash effects
+  s = {
+    ...s,
+    slashEffects: s.slashEffects
+      .map(se => ({ ...se, life: se.life - dt }))
+      .filter(se => se.life > 0),
   };
 
   // Update bullet positions
@@ -91,20 +147,19 @@ export function tickGame(state: GameState, dt: number, cellSize: number): GameSt
 
   for (const bullet of s.bullets) {
     const target = updatedMonsters.find(m => m.id === bullet.targetId);
-    if (!target) continue; // target already dead
+    if (!target) continue;
 
     const nx = bullet.x + bullet.vx * dt * bulletSpeed;
     const ny = bullet.y + bullet.vy * dt * bulletSpeed;
     const d = dist(nx, ny, target.x, target.y);
 
     if (d < cellSize * 0.4) {
-      // Hit!
       const newHp = target.hp - 25;
       if (newHp <= 0) {
         updatedMonsters = updatedMonsters.filter(m => m.id !== target.id);
         coinsGained++;
         kills++;
-        s = addFloat(s, target.x, target.y - cellSize * 0.5, "+1 🪙", "#fbbf24");
+        s = addFloat(s, target.x, target.y - cellSize * 0.5, "🔫 +1🪙", "#fbbf24");
       } else {
         updatedMonsters = updatedMonsters.map(m =>
           m.id === target.id ? { ...m, hp: newHp } : m
@@ -114,7 +169,13 @@ export function tickGame(state: GameState, dt: number, cellSize: number): GameSt
       updatedBullets.push({ ...bullet, x: nx, y: ny });
     }
   }
-  s = { ...s, bullets: updatedBullets, monsters: updatedMonsters, coins: s.coins + coinsGained, monstersKilled: s.monstersKilled + kills };
+  s = {
+    ...s,
+    bullets: updatedBullets,
+    monsters: updatedMonsters,
+    coins: s.coins + coinsGained,
+    monstersKilled: s.monstersKilled + kills,
+  };
 
   // Update gun cooldowns and fire
   let newBullets: Bullet[] = [...s.bullets];
@@ -123,7 +184,6 @@ export function tickGame(state: GameState, dt: number, cellSize: number): GameSt
     if (cooldown <= 0 && s.monsters.length > 0) {
       const gx = gun.col * cellSize + cellSize / 2;
       const gy = gun.row * cellSize + cellSize / 2;
-      // Find nearest monster
       let nearest: Monster | null = null;
       let nearestDist = Infinity;
       for (const m of s.monsters) {
@@ -149,14 +209,13 @@ export function tickGame(state: GameState, dt: number, cellSize: number): GameSt
   });
   s = { ...s, guns: updatedGuns, bullets: newBullets };
 
-  // Move monsters toward pet (or nearest block)
+  // Move monsters and handle attacks
   let newMonsters: Monster[] = [];
   let newBlocks = [...s.blocks];
   let petDamaged = false;
   let pet = s.pet ? { ...s.pet } : null;
 
   for (let monster of s.monsters) {
-    // Find nearest target: blocks or pet
     let targetX = petX;
     let targetY = petY;
     let nearestBlock: Block | null = null;
@@ -172,7 +231,6 @@ export function tickGame(state: GameState, dt: number, cellSize: number): GameSt
       }
     }
 
-    // Check if pet is accessible (no blocks between monster and pet)
     const petDist = dist(monster.x, monster.y, petX, petY);
     if (nearestBlock && nearestBlockDist < petDist * 0.8) {
       const bx = nearestBlock.col * cellSize + cellSize / 2;
@@ -192,18 +250,16 @@ export function tickGame(state: GameState, dt: number, cellSize: number): GameSt
       m.y += (dy / d) * m.speed * dt;
     }
 
-    // Attack timer
     m.attackTimer = Math.max(0, m.attackTimer - dt * 1000);
 
-    // Sword auto-attack monsters in range of pet
+    // Passive sword aura (very weak — clicking is the main sword mechanic)
     const distToPet = dist(m.x, m.y, petX, petY);
-    if (distToPet < swordRange && m.attackTimer === 0) {
-      // Sword hits monster
-      m.hp -= swordDmg * dt * 2;
+    if (distToPet < cellSize * 1.8) {
+      m.hp -= swordDmg * dt;
     }
 
     if (m.hp <= 0) {
-      s = addFloat(s, m.x, m.y - cellSize * 0.5, "+1 🪙", "#fbbf24");
+      s = addFloat(s, m.x, m.y - cellSize * 0.5, "⚔️ +1🪙", "#fbbf24");
       s = { ...s, coins: s.coins + 1, monstersKilled: s.monstersKilled + 1 };
       continue;
     }
@@ -218,7 +274,9 @@ export function tickGame(state: GameState, dt: number, cellSize: number): GameSt
         if (newHp <= 0) {
           newBlocks = newBlocks.filter(b => b.id !== nearestBlock!.id);
         } else {
-          newBlocks = newBlocks.map(b => b.id === nearestBlock!.id ? { ...b, hp: newHp } : b);
+          newBlocks = newBlocks.map(b =>
+            b.id === nearestBlock!.id ? { ...b, hp: newHp } : b
+          );
         }
       }
     }
@@ -237,10 +295,9 @@ export function tickGame(state: GameState, dt: number, cellSize: number): GameSt
   }
 
   if (petDamaged && pet) {
-    s = addFloat(s, petX, petY - cellSize, `-${1}❤️`, "#ef4444");
+    s = addFloat(s, petX, petY - cellSize, `-1❤️`, "#ef4444");
   }
 
-  // Wave complete
   const waveActive = newMonsters.length > 0;
 
   return {
@@ -273,19 +330,10 @@ export function placeItem(state: GameState, col: number, row: number): GameState
   if (occupied) return state;
 
   if (state.placingMode === "block") {
-    const block: Block = {
-      id: nextId(),
-      col, row,
-      hp: BLOCK_HP, maxHp: BLOCK_HP,
-    };
+    const block: Block = { id: nextId(), col, row, hp: BLOCK_HP, maxHp: BLOCK_HP };
     return { ...state, blocks: [...state.blocks, block], placingMode: null };
   } else if (state.placingMode === "gun") {
-    const gun: Gun = {
-      id: nextId(),
-      col, row,
-      cooldown: 0,
-      cooldownMax: 1500,
-    };
+    const gun: Gun = { id: nextId(), col, row, cooldown: 0, cooldownMax: 1500 };
     return { ...state, guns: [...state.guns, gun], placingMode: null };
   }
   return state;
