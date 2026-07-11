@@ -12,6 +12,7 @@ import {
   startWave, tickGame, buyBlock, buyGun, placeItem,
   upgradeSword, upgradePet, swordSlash,
 } from "./lib/gameLogic";
+import { saveGame, loadGame, clearSave } from "./lib/saveLoad";
 
 const CELL = 44;
 
@@ -38,7 +39,15 @@ function makeInitialState(): GameState {
 }
 
 // ── PetSelect screen ──────────────────────────────────────────────────────────
-function PetSelect({ onSelect }: { onSelect: (p: PetType) => void }) {
+function PetSelect({
+  onSelect,
+  savedState,
+  onContinue,
+}: {
+  onSelect: (p: PetType) => void;
+  savedState: GameState | null;
+  onContinue: () => void;
+}) {
   const pets: PetType[] = ["cat", "dog", "bird", "fish"];
   const labels: Record<PetType, string> = { cat: "Cat 🐱", dog: "Dog 🐶", bird: "Bird 🐦", fish: "Fish 🐟" };
 
@@ -50,6 +59,44 @@ function PetSelect({ onSelect }: { onSelect: (p: PetType) => void }) {
       <p className="text-base" style={{ color: "var(--muted)" }}>
         Your pet needs your protection — choose wisely!
       </p>
+
+      {/* Continue saved game */}
+      {savedState && savedState.pet && (
+        <div
+          className="w-full max-w-sm rounded-2xl p-4 flex flex-col gap-3"
+          style={{ background: "var(--panel)", border: "2px solid var(--accent)" }}
+        >
+          <div className="text-sm font-bold" style={{ color: "var(--accent)" }}>💾 Saved Game Found</div>
+          <div className="flex items-center gap-3 text-sm" style={{ color: "var(--ink)" }}>
+            <span style={{ fontSize: 32 }}>{PET_EMOJIS[savedState.pet.type]}</span>
+            <div className="flex flex-col gap-0.5">
+              <span className="font-bold capitalize">{savedState.pet.type} — <span style={{ color: PET_TIER_COLORS[savedState.pet.tier] }}>{savedState.pet.tier}</span></span>
+              <span style={{ color: "var(--muted)" }}>Wave {savedState.wave} · {savedState.coins} 🪙 · {savedState.monstersKilled} kills</span>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={onContinue}
+              className="flex-1 py-2 rounded-xl font-bold text-white text-sm transition-all active:scale-95"
+              style={{ background: "var(--accent)", minHeight: 44 }}
+            >
+              ▶ Continue
+            </button>
+            <button
+              onClick={() => { clearSave(); window.location.reload(); }}
+              className="px-3 py-2 rounded-xl font-bold text-sm transition-all active:scale-95"
+              style={{ background: "var(--panel)", border: "1px solid var(--line)", color: "var(--muted)", minHeight: 44 }}
+            >
+              🗑 Delete
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--muted)" }}>
+        — or start new game —
+      </div>
+
       <div className="grid grid-cols-2 gap-4 w-full max-w-sm">
         {pets.map(p => (
           <button
@@ -136,14 +183,12 @@ function GameBoard({
     }
   }, [state.placingMode, onCellClick, onPixelClick]);
 
-  // Determine cursor
   let cursor = "default";
   if (state.placingMode) cursor = "crosshair";
   else if (state.waveActive && !state.gameOver) {
     cursor = state.swordCooldown > 0 ? "wait" : "pointer";
   }
 
-  // Draw canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -156,11 +201,9 @@ function GameBoard({
 
     const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
 
-    // Background
     ctx.fillStyle = isDark ? "#111827" : "#f0fdf4";
     ctx.fillRect(0, 0, W, H);
 
-    // Grid lines
     ctx.strokeStyle = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
     ctx.lineWidth = 1;
     for (let c = 0; c <= GRID_COLS; c++) {
@@ -170,7 +213,6 @@ function GameBoard({
       ctx.beginPath(); ctx.moveTo(0, r * CELL); ctx.lineTo(W, r * CELL); ctx.stroke();
     }
 
-    // Placing mode overlay
     if (state.placingMode) {
       ctx.fillStyle = "rgba(37,99,235,0.07)";
       ctx.fillRect(0, 0, W, H);
@@ -229,7 +271,6 @@ function GameBoard({
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(PET_EMOJIS[state.pet.type], px + CELL / 2, py + CELL / 2);
-      // HP bar
       const barW = CELL * 1.4;
       const barX = px + CELL / 2 - barW / 2;
       const barY = py + CELL + 2;
@@ -257,7 +298,6 @@ function GameBoard({
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(monster.emoji, monster.x, monster.y);
-      // HP bar
       const barW = CELL * 1.1;
       const barX = monster.x - barW / 2;
       const barY = monster.y - CELL * 0.5;
@@ -273,7 +313,6 @@ function GameBoard({
       const alpha = slash.life / slash.maxLife;
       const radius = CELL * (0.3 + progress * 0.9);
       ctx.globalAlpha = alpha;
-      // Draw an X slash
       ctx.strokeStyle = "#fef08a";
       ctx.lineWidth = 4;
       ctx.lineCap = "round";
@@ -285,7 +324,6 @@ function GameBoard({
       ctx.moveTo(slash.x + radius, slash.y - radius);
       ctx.lineTo(slash.x - radius, slash.y + radius);
       ctx.stroke();
-      // Glow ring
       ctx.strokeStyle = "#ef4444";
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -390,7 +428,7 @@ function ShopPanel({
         </div>
       )}
 
-      {/* Sword status + hint */}
+      {/* Sword status */}
       <div
         className="rounded-xl p-2"
         style={{ background: "var(--panel)", border: `2px solid ${swordColor}44` }}
@@ -404,7 +442,6 @@ function ShopPanel({
         <div className="text-xs mb-1" style={{ color: "var(--muted)" }}>
           {state.waveActive ? "Click monsters to slash!" : "Equip & click monsters"}
         </div>
-        {/* Cooldown bar */}
         {state.waveActive && (
           <div style={{ height: 4, background: "var(--line)", borderRadius: 2, overflow: "hidden" }}>
             <div
@@ -450,12 +487,12 @@ function ShopPanel({
         <span className="ml-auto font-bold" style={{ color: "#fbbf24" }}>{GUN_COST}🪙</span>
       </button>
 
-      <div className="text-xs font-bold uppercase tracking-wider mt-1" style={{ color: "var(--muted)" }}>⚔️ Upgrade Sword</div>
+      <div className="text-xs font-bold uppercase tracking-wider mt-1" style={{ color: "var(--muted)" }}>⚔️ Sword</div>
 
       <div className="rounded-xl p-2 text-sm" style={{ background: "var(--panel)", border: "1px solid var(--line)" }}>
         <div className="flex items-center gap-2 mb-1">
           <span style={{ fontSize: 20 }}>{SWORD_EMOJIS[state.swordTier]}</span>
-          <span className="font-bold capitalize" style={{ color: swordColor }}>{state.swordTier} Sword</span>
+          <span className="font-bold capitalize" style={{ color: swordColor }}>{state.swordTier}</span>
         </div>
         {nextSword && swordCost ? (
           <button
@@ -479,7 +516,7 @@ function ShopPanel({
         )}
       </div>
 
-      <div className="text-xs font-bold uppercase tracking-wider mt-1" style={{ color: "var(--muted)" }}>🐾 Upgrade Pet</div>
+      <div className="text-xs font-bold uppercase tracking-wider mt-1" style={{ color: "var(--muted)" }}>🐾 Pet</div>
 
       <div className="rounded-xl p-2 text-sm" style={{ background: "var(--panel)", border: "1px solid var(--line)" }}>
         <div className="flex items-center gap-2 mb-1">
@@ -515,13 +552,32 @@ function ShopPanel({
 
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
-  const [state, setState] = useState<GameState>(makeInitialState);
+  // Load saved game on first render
+  const [state, setState] = useState<GameState>(() => {
+    const saved = loadGame();
+    return saved ?? makeInitialState();
+  });
+
+  // Keep a ref to the saved state for the pet-select screen
+  const [savedState] = useState<GameState | null>(() => loadGame());
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<GameState>(state);
   const rafRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
 
   stateRef.current = state;
+
+  // Auto-save whenever state changes (but not pet-select or game-over)
+  useEffect(() => {
+    if (state.phase === "playing" && !state.gameOver) {
+      saveGame(state);
+    }
+    if (state.gameOver) {
+      // Clear save on death so next session starts fresh
+      clearSave();
+    }
+  }, [state]);
 
   // Game loop
   useEffect(() => {
@@ -543,18 +599,23 @@ export default function App() {
   }, [state.phase, state.gameOver, state.waveActive]);
 
   const handlePetSelect = useCallback((petType: PetType) => {
-    setState(prev => ({
-      ...prev,
+    clearSave();
+    setState(_prev => ({
+      ...makeInitialState(),
       phase: "playing" as Phase,
       pet: { type: petType, tier: "normal", hp: 15, maxHp: 15 },
     }));
+  }, []);
+
+  const handleContinue = useCallback(() => {
+    const saved = loadGame();
+    if (saved) setState(saved);
   }, []);
 
   const handleCellClick = useCallback((col: number, row: number) => {
     setState(prev => placeItem(prev, col, row));
   }, []);
 
-  // Pixel-level click — sword slash at monsters
   const handlePixelClick = useCallback((x: number, y: number) => {
     setState(prev => swordSlash(prev, x, y, CELL));
   }, []);
@@ -567,6 +628,7 @@ export default function App() {
   }, []);
 
   const handleRestart = useCallback(() => {
+    clearSave();
     setState(makeInitialState());
   }, []);
 
@@ -574,7 +636,13 @@ export default function App() {
 
   return (
     <GameShell topbar={<GameTopbar title="Monster Attack" score={score} />}>
-      {state.phase === "pet-select" && <PetSelect onSelect={handlePetSelect} />}
+      {state.phase === "pet-select" && (
+        <PetSelect
+          onSelect={handlePetSelect}
+          savedState={savedState}
+          onContinue={handleContinue}
+        />
+      )}
 
       {state.phase === "playing" && state.gameOver && (
         <GameOver wave={state.wave} killed={state.monstersKilled} onRestart={handleRestart} />
@@ -640,7 +708,7 @@ export default function App() {
             {!state.waveActive ? (
               <button
                 onClick={handleStartWave}
-                className="flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-white text-base transition-all active:scale-95"
+                className="flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-white transition-all active:scale-95"
                 style={{
                   background: "linear-gradient(135deg, #dc2626, #7f1d1d)",
                   minHeight: 48,
@@ -660,28 +728,12 @@ export default function App() {
                 >
                   ⚔️ Wave {state.wave}
                 </div>
-                {/* Sword hint */}
-                <div
-                  className="px-3 py-1 rounded-xl text-xs font-bold"
-                  style={{
-                    background: state.swordCooldown > 0 ? "var(--panel)" : "#f0fdf4",
-                    color: state.swordCooldown > 0 ? "var(--muted)" : "#16a34a",
-                    border: `1px solid ${state.swordCooldown > 0 ? "var(--line)" : "#16a34a"}`,
-                  }}
-                >
-                  {SWORD_EMOJIS[state.swordTier]} {state.swordCooldown > 0 ? "cooldown…" : "Click monsters!"}
-                </div>
                 {state.pet && (
-                  <div className="flex items-center gap-1">
-                    <span style={{ fontSize: 16 }}>{PET_EMOJIS[state.pet.type]}</span>
+                  <div className="flex items-center gap-2 text-sm">
+                    <span>{PET_EMOJIS[state.pet.type]}</span>
                     <div
-                      style={{
-                        width: 60,
-                        height: 8,
-                        background: "var(--line)",
-                        borderRadius: 4,
-                        overflow: "hidden",
-                      }}
+                      className="rounded-full overflow-hidden"
+                      style={{ width: 80, height: 10, background: "var(--line)" }}
                     >
                       <div
                         style={{
@@ -704,6 +756,14 @@ export default function App() {
                 )}
               </div>
             )}
+          </div>
+
+          {/* Save indicator */}
+          <div
+            className="text-center text-xs py-0.5"
+            style={{ color: "var(--muted)", background: "var(--panel)", borderTop: "1px solid var(--line)" }}
+          >
+            💾 Game saves automatically
           </div>
         </div>
       )}
