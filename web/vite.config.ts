@@ -34,9 +34,9 @@ export default defineConfig({
         ],
       },
       manifest: {
-        name: "APPNAME",
-        short_name: "APPNAME",
-        description: "APPNAME — free forever",
+        name: "monster attack",
+        short_name: "monster attack",
+        description: "monster attack — free forever",
         start_url: "/",
         display: "standalone",
         background_color: "#ffffff",
