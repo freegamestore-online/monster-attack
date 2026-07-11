@@ -9,7 +9,7 @@ import {
 } from "./types";
 import {
   startWave, tickGame, buyBlock, buyGun, placeItem,
-  upgradeSword, upgradePet, nextId,
+  upgradeSword, upgradePet,
 } from "./lib/gameLogic";
 
 // ── initial state ─────────────────────────────────────────────────────────────
